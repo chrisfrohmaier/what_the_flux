@@ -27,4 +27,4 @@ The magnitudes system is a **relative brightness**
 
 ## Fluxes
 
-Please refer to the jupyter notebook `Fluxes_and_AB.ipynb` for more indepth discussion on flux systems and demonstration code.
+Please refer to the jupyter notebook [`Fluxes_and_AB.ipynb`](https://github.com/chrisfrohmaier/what_the_flux/blob/master/Fluxes_and_AB.ipynb)  for more in depth discussion on flux systems and some demonstration code.
