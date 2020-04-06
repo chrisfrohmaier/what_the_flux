@@ -55,7 +55,7 @@ def loadFilter(dir, natural=True):
     else: return w, (t/w)/max(t/w)
 
 def fluxLamFilter(wave, filt_wave, fil_trans, F_lam):
-    filt_int = np.interp(wave.value, filt_wave.value, fil_trans, left=0, right=0)
+    filt_int = np.interp(wave, filt_wave.value, fil_trans, left=0, right=0)
     filtspec = filt_int*F_lam
     fluxFilt = np.trapz(filtspec,wave.value)
     #if type(fluxFilt)==u.quantity.Quantity:
