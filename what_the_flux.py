@@ -159,12 +159,12 @@ class Band_AB(object):
         if perArea==True:
             return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]).value/self.areaA().value)
         else:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]))
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])).value
 
     def zpFlux(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA()
+            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA().value
         else:
             return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])
     
