@@ -281,7 +281,7 @@ class Band_Vega(object):
         wavelength_array = self.filterFLambdaBins()
 
         #intepolate Vega to the same wavelength_array
-        F_Vega_interp = np.interp(wavelength_array, w_Vega, f_Vega)*u.erg/u.s/u.cm**2/u.AA
+        F_Vega_interp = np.interp(wavelength_array.value, w_Vega, f_Vega)*u.erg/u.s/u.cm**2/u.AA
 
         return wavelength_array, F_Vega_interp
 
