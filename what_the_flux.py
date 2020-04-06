@@ -157,7 +157,7 @@ class Band_AB(object):
     def zpAngstrom(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA())
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]).value/self.areaA())
         else:
             return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]))
 
