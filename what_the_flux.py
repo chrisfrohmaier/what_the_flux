@@ -183,7 +183,7 @@ class Band_AB(object):
         return np.average(self.wave,weights=self.transmission)
 
     def effWave(self):
-        fw = np.interp(self.wave, self.filterFLambdaBins().value, self._zpFluxesFlam()[1])
+        fw = np.interp(self.wave.value, self.filterFLambdaBins().value, self._zpFluxesFlam()[1])
         n1 = self.wave*self.transmission*fw
         d1 = self.transmission*fw
         return np.trapz(n1)/np.trapz(d1)
