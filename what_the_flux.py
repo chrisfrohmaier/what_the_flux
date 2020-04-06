@@ -157,16 +157,16 @@ class Band_AB(object):
     def zpAngstrom(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA())
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA())
         else:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1]))
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]))
 
     def zpFlux(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA()
+            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA()
         else:
-            return fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])
     
     def zpFluxFnu(self,perArea=True):
         F0lam = self.zpFlux(perArea=perArea)
@@ -307,16 +307,16 @@ class Band_Vega(object):
     def zpAngstrom(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA())
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA())
         else:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1]))
+            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]))
 
     def zpFlux(self,perArea=True):
         zp_dum = self._zpFluxesFlam()
         if perArea==True:
-            return fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA()
+            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA()
         else:
-            return fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])
 
     def zpFluxFnu(self,perArea=True):
         F0lam = self.zpFlux(perArea=perArea)
