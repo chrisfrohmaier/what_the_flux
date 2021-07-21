@@ -391,7 +391,7 @@ class Spectrum(object):
     def bandflux(self, band):
         """Do some integration through a filter in this function
         """
-        filt_int = np.interp(self.wave, band.wave,band.transmission)
+        filt_int = np.interp(self.wave, band.wave.value,band.transmission.value)
         filtspec = filt_int*self.flux
         flux1 = np.trapz(filtspec,self.wave)/band.areaA()
         return flux1
