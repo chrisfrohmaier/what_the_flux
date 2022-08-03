@@ -79,7 +79,7 @@ def ERRmag2ERRflux(band, magnitude, err_magnitude, perArea=True):
     return band.zpFlux(perArea=perArea)* np.abs(10**(-0.4*magnitude) * np.log(10.)*(-0.4)*err_magnitude)
 
 def flux2mag(band,flux, perArea=True):
-    return -2.5*np.log10(flux/ band.zpFlux(perArea=perArea).value)
+    return -2.5*np.log10(flux.value / band.zpFlux(perArea=perArea).value)
 
 def ERRflux2ERRmag(band,flux, err_flux, perArea=True):
     return 2.5/np.log(10.) * err_flux/flux
