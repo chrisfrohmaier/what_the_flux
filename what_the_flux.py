@@ -1,9 +1,17 @@
+import os
 import numpy as np
 import scipy.interpolate as spint
 import astropy.units as u
 import astropy.constants as const
-import scipy.ndimage.filters as spfilt
-import sncosmo
+import scipy.ndimage as ndimage
+import extinction
+from astropy.io import fits
+from functools import cached_property
+
+if hasattr(np, 'trapezoid'):
+    trapz = np.trapezoid
+else:
+    trapz = np.trapz
 
 
 def get_color_band(band_name):
@@ -29,15 +37,6 @@ def get_color_band(band_name):
     else:
         return 'grey'
 
-#load vega spectrum
-from astropy.io import fits
-vega = fits.open('./alpha_lyr_stis_006.fits')
-w_Vega_full, f_Vega_full = vega[1].data['WAVELENGTH'], vega[1].data['FLUX']
-mask_Vega = (w_Vega_full>500.)&(w_Vega_full<25000)
-w_Vega = w_Vega_full[mask_Vega]
-f_Vega = f_Vega_full[mask_Vega]
-
-
 def loadFilter(dir, natural=True):
     '''In this function, the files cotaining the filter
     transmission functions are loaded and returns the wavelengths and
@@ -55,19 +54,22 @@ def loadFilter(dir, natural=True):
     else: return w, (t/w)/max(t/w)
 
 def fluxLamFilter(wave, filt_wave, fil_trans, F_lam):
-    filt_int = np.interp(wave.value, filt_wave, fil_trans, left=0, right=0)
+    w_val = wave.value if hasattr(wave, 'value') else wave
+    fw_val = filt_wave.value if hasattr(filt_wave, 'value') else filt_wave
+    
+    filt_int = np.interp(w_val, fw_val, fil_trans, left=0, right=0)
     filtspec = filt_int*F_lam
-    fluxFilt = np.trapz(filtspec,wave.value)
-    #if type(fluxFilt)==u.quantity.Quantity:
-    #    return fluxFilt.value
-    #else: return float(fluxFilt)
+    fluxFilt = trapz(filtspec, x=wave)
     return fluxFilt
 
 def countFilter(wave, filt_wave, fil_trans, F_cnt):
-    filt_int = np.interp(wave, filt_wave, fil_trans)
+    w_val = wave.value if hasattr(wave, 'value') else wave
+    fw_val = filt_wave.value if hasattr(filt_wave, 'value') else filt_wave
+    
+    filt_int = np.interp(w_val, fw_val, fil_trans, left=0, right=0)
     filtspec = filt_int*F_cnt
-    countFilt = np.trapz(filtspec,wave)
-    if type(countFilt)==u.quantity.Quantity:
+    countFilt = trapz(filtspec, x=wave)
+    if isinstance(countFilt, u.quantity.Quantity):
         return countFilt.value
     else: return float(countFilt)
 
@@ -91,109 +93,63 @@ def mag2Counts(band, magnitude,totalThrough=True):
         return band.zpCnt(perArea=False)*10.**(magnitude/-2.5)
 
 
-class Band_AB(object):
-    """The transmission function of a filter.
-    The transmission is a fraction of 1, unless fraction = False
-    The wavelengths are in Angstrom
-
-    Parameters
-    -----------
-    wave: array
-
-    transmission: array
-
-    Examples
-    -----------
-
-    import pyfilter as wtf
-    w, t = wtf.loadFilter('/path/to/Bessell_B.dat')
-    B=wtf.Band(w,t)
-
-    r.meanWave()
-    4413.083819849874
-
-    r.effWave()
-    4357.412565527486
-
-    r.zpFlux()
-    5.69885539058255e-09
-
-    """
-
-
+class BaseBand(object):
     def __init__(self, wave, transmission):
-        super(Band_AB, self).__init__()
         if wave.shape != transmission.shape:
-            raise ValueError('The wave array and transmission array\
-             are different sizes!')
-
-        self.wave = wave*u.AA
+            raise ValueError('The wave array and transmission array are different sizes!')
+        self.wave = wave * u.AA
         self.transmission = transmission
-
-    def _Fnu(self):
-        return 3631e-23*(u.erg/u.s/u.cm**2/u.Hz)
+        self._areaA = np.abs(trapz(self.transmission, x=self.wave))
 
     def filterFLambdaBins(self):
-        return np.arange(min(self.wave.value),max(self.wave.value)+1.,1.)*u.AA
-
-    def _zpFluxesFlam(self):
-        wavelength_array = self.filterFLambdaBins()
-        F_nu = self._Fnu()
-        F_lam = (F_nu*const.c.cgs/((wavelength_array)**2.)).to(u.erg/u.s/u.cm**2/u.AA)
-        return wavelength_array, F_lam
-
-    def _zpFluxesFcnt(self):
-        wavelength_array = self.filterFLambdaBins()
-        F_nu = self._Fnu()
-
-        F_lam = (F_nu*const.c.cgs/((wavelength_array)**2.)).to(u.erg/u.s/u.cm**2/u.AA)
-
-        F_cnt = ((F_lam.value*wavelength_array.value)/(const.c.cgs.value*const.h.cgs.value))*1e-8
-        return wavelength_array, F_cnt
+        return np.arange(min(self.wave.value), max(self.wave.value)+1., 1.) * u.AA
 
     def areaA(self):
-        return ((np.trapz(self.wave,self.transmission))**2)**0.5
+        return self._areaA
 
-    def zpAngstrom(self,perArea=True):
+    def zpAngstrom(self, perArea=True):
         zp_dum = self._zpFluxesFlam()
-        if perArea==True:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]).value/self.areaA().value)
+        flux = fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+        if perArea:
+            return -2.5*np.log10(flux.value / self.areaA().value)
         else:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]).value)
+            return -2.5*np.log10(flux.value)
 
-    def zpFlux(self,perArea=True):
+    def zpFlux(self, perArea=True):
         zp_dum = self._zpFluxesFlam()
-        if perArea==True:
-            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA().value
+        flux = fluxLamFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+        if perArea:
+            return flux / self.areaA().value
         else:
-            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])
-    
-    def zpFluxFnu(self,perArea=True):
+            return flux
+
+    def zpFluxFnu(self, perArea=True):
         F0lam = self.zpFlux(perArea=perArea)
-        return (F0lam / const.c.cgs *((self.effWave())**2.)).to(u.erg/u.s/u.cm**2/u.Hz)
+        return (F0lam / const.c.cgs * ((self.effWave())**2)).to(u.erg/u.s/u.cm**2/u.Hz)
 
-    def zpCnt(self,perArea=True):
+    def zpCnt(self, perArea=True):
         zp_dum = self._zpFluxesFcnt()
-        if perArea==True:
-            return countFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA()
+        cnt = countFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+        if perArea:
+            return cnt / self.areaA().value
         else:
-            return countFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
+            return cnt
 
     def meanWave(self):
-        return np.average(self.wave,weights=self.transmission)
+        return np.average(self.wave, weights=self.transmission)
 
     def effWave(self):
-        fw = np.interp(self.wave.value, self.filterFLambdaBins().value, self._zpFluxesFlam()[1])
-        n1 = self.wave*self.transmission*fw
-        d1 = self.transmission*fw
-        return np.trapz(n1)/np.trapz(d1)
+        fw = np.interp(self.wave.value, self.filterFLambdaBins().value, self._zpFluxesFlam()[1].value)
+        n1 = self.wave * self.transmission * fw
+        d1 = self.transmission * fw
+        return trapz(n1, x=self.wave) / trapz(d1, x=self.wave)
 
     def pivot(self):
-        lt = np.trapz(self.wave*self.transmission, self.wave)
-        return np.sqrt(lt/np.trapz(self.transmission/self.wave,self.wave))
+        lt = trapz(self.wave * self.transmission, x=self.wave)
+        return np.sqrt(lt / trapz(self.transmission / self.wave, x=self.wave))
 
     def peakWave(self):
-        return self.wave[self.transmission==max(self.transmission)][0]
+        return self.wave[self.transmission == max(self.transmission)][0]
 
     def minWave(self):
         return min(self.wave)
@@ -202,183 +158,115 @@ class Band_AB(object):
         return max(self.wave)
 
     def wiredfunc(self):
-        int1 = np.trapz(self.transmission/self.wave, self.wave)
-        int2 = np.trapz(self.transmission/(self.wave)**2, self.wave)
-        int3 = np.trapz(self.transmission, self.wave)
-        return int1**2 / (int2*int3)
+        int1 = trapz(self.transmission / self.wave, x=self.wave)
+        int2 = trapz(self.transmission / (self.wave)**2, x=self.wave)
+        int3 = trapz(self.transmission, x=self.wave)
+        return int1**2 / (int2 * int3)
 
     def extinction(self, eb_v, dust_law, r_v=3.1):
-        """ Given eb-v and r-v return the dust extinction in a particular BAND 
-         It can use:
-         Cardelli dust law (CCM),
-         ODonneal (OD94)
-         Fitzpatrick (F99)
-
-        KEEP IN MIND:
-        _minwave = 909.09
-        _maxwave = 33333.33
-         """
-        if dust_law=='OD94':
-            dust = sncosmo.OD94Dust()
-        elif dust_law=='CCM':
-            dust = sncosmo.CCM89Dust()
-        elif dust_law=='F99':
-            dust = sncosmo.F99Dust()
-        else: print ('Add this dust law! I dont know it')
-
-        dust.parameters = [eb_v, r_v]
-        w = self.wave
+        a_v = eb_v * r_v
+        w = self.wave.value
         t = self.transmission
-        ext = dust.propagate(w,t)
-        correction_extinction = np.trapz((ext)[1:-1], w[1:-1])/np.trapz((t)[1:-1], w[1:-1])
+        
+        if dust_law == 'OD94':
+            a_lambda = extinction.od94(w, a_v, r_v)
+        elif dust_law == 'CCM':
+            a_lambda = extinction.ccm89(w, a_v, r_v)
+        elif dust_law == 'F99':
+            a_lambda = extinction.fitzpatrick99(w, a_v, r_v)
+        else: 
+            print('Add this dust law! I dont know it')
+            return None
+
+        ext = t * 10**(-0.4 * a_lambda)
+        correction_extinction = trapz(ext, x=w) / trapz(t, x=w)
         return correction_extinction
-
-
-class Band_Vega(object):
-    """The transmission function of a filter.
-    The transmission is a fraction of 1, unless fraction = False
-    The wavelengths are in Angstrom
-
-    Parameters
-    -----------
-    wave: array
-
-    transmission: array
-
-    Examples
-    -----------
-
-    import pyfilter as wtf
-    w, t = wtf.loadFilter('/path/to/Bessell_B.dat')
-    B=wtf.Band(w,t)
-
-    r.meanWave()
-    4413.083819849874
-
-    r.effWave()
-    4357.412565527486
-
-    r.zpFlux()
-    5.69885539058255e-09
-
-    """
-
-
-    def __init__(self, wave, transmission):
-        super(Band_Vega, self).__init__()
-        if wave.shape != transmission.shape:
-            raise ValueError('The wave array and transmission array\
-             are different sizes!')
-
-        self.wave = wave*u.AA
-        self.transmission = transmission
-
-
-    def filterFLambdaBins(self):
-        return np.arange(min(self.wave.value),max(self.wave.value)+1.,1.)*u.AA
 
     def _zpFluxesFlam(self):
-        wavelength_array = self.filterFLambdaBins()
-
-        #intepolate Vega to the same wavelength_array
-        F_Vega_interp = np.interp(wavelength_array.value, w_Vega, f_Vega)*u.erg/u.s/u.cm**2/u.AA
-
-        return wavelength_array, F_Vega_interp
+        raise NotImplementedError
 
     def _zpFluxesFcnt(self):
-        wavelength_array = self.filterFLambdaBins()
-
-        F_lam = self._zpFluxesFlam()
-
-        F_cnt = ((F_lam.value*wavelength_array.value)/(const.c.cgs *const.h.cgs ))*1e-8
-        return wavelength_array, F_cnt
+        raise NotImplementedError
 
     def _zpFluxesFnu(self):
-        wavelength_array = self.filterFLambdaBins()
-        
-        F_lam = self._zpFluxesFlam()[1]
+        raise NotImplementedError
 
-        F_nu = (F_lam / const.c.cgs *((wavelength_array)**2.)).to(u.erg/u.s/u.cm**2/u.Hz)
+
+class Band_AB(BaseBand):
+    """The transmission function of a filter in AB.
+    The transmission is a fraction of 1.
+    The wavelengths are in Angstrom
+    """
+    def _Fnu(self):
+        return 3631e-23 * (u.erg/u.s/u.cm**2/u.Hz)
+
+    @cached_property
+    def _cached_zpFluxesFlam(self):
+        wavelength_array = self.filterFLambdaBins()
+        F_nu = self._Fnu()
+        F_lam = (F_nu * const.c.cgs / (wavelength_array**2)).to(u.erg/u.s/u.cm**2/u.AA)
+        return wavelength_array, F_lam
+
+    def _zpFluxesFlam(self):
+        return self._cached_zpFluxesFlam
+
+    @cached_property
+    def _cached_zpFluxesFcnt(self):
+        wavelength_array = self.filterFLambdaBins()
+        F_nu = self._Fnu()
+        F_lam = (F_nu * const.c.cgs / (wavelength_array**2)).to(u.erg/u.s/u.cm**2/u.AA)
+        F_cnt = ((F_lam.value * wavelength_array.value) / (const.c.cgs.value * const.h.cgs.value)) * 1e-8
+        return wavelength_array, F_cnt
+
+    def _zpFluxesFcnt(self):
+        return self._cached_zpFluxesFcnt
+
+    def _zpFluxesFnu(self):
+        return self.filterFLambdaBins(), self._Fnu() * np.ones(len(self.filterFLambdaBins()))
+
+
+class Band_Vega(BaseBand):
+    """The transmission function of a filter in Vega.
+    The transmission is a fraction of 1.
+    The wavelengths are in Angstrom
+    """
+    @cached_property
+    def vega_spectrum(self):
+        module_dir = os.path.dirname(__file__)
+        vega_path = os.path.join(module_dir, 'alpha_lyr_stis_006.fits')
+        with fits.open(vega_path) as vega:
+            w_Vega_full = vega[1].data['WAVELENGTH']
+            f_Vega_full = vega[1].data['FLUX']
+            mask_Vega = (w_Vega_full > 500.) & (w_Vega_full < 25000)
+            return w_Vega_full[mask_Vega], f_Vega_full[mask_Vega]
+
+    @cached_property
+    def _cached_zpFluxesFlam(self):
+        wavelength_array = self.filterFLambdaBins()
+        w_Vega, f_Vega = self.vega_spectrum
+        F_Vega_interp = np.interp(wavelength_array.value, w_Vega, f_Vega) * (u.erg/u.s/u.cm**2/u.AA)
+        return wavelength_array, F_Vega_interp
+
+    def _zpFluxesFlam(self):
+        return self._cached_zpFluxesFlam
+
+    @cached_property
+    def _cached_zpFluxesFcnt(self):
+        wavelength_array, F_lam = self._zpFluxesFlam()
+        F_cnt = ((F_lam.value * wavelength_array.value) / (const.c.cgs.value * const.h.cgs.value)) * 1e-8
+        return wavelength_array, F_cnt
+
+    def _zpFluxesFcnt(self):
+        return self._cached_zpFluxesFcnt
+
+    @cached_property
+    def _cached_zpFluxesFnu(self):
+        wavelength_array, F_lam = self._zpFluxesFlam()
+        F_nu = (F_lam / const.c.cgs * (wavelength_array**2)).to(u.erg/u.s/u.cm**2/u.Hz)
         return wavelength_array, F_nu
 
-    def areaA(self):
-        return ((np.trapz(self.wave,self.transmission))**2)**0.5
-
-    def zpAngstrom(self,perArea=True):
-        zp_dum = self._zpFluxesFlam()
-        if perArea==True:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA())
-        else:
-            return -2.5*np.log10(fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1]))
-
-    def zpFlux(self,perArea=True):
-        zp_dum = self._zpFluxesFlam()
-        if perArea==True:
-            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])/self.areaA()
-        else:
-            return fluxLamFilter(zp_dum[0], self.wave.value, self.transmission, zp_dum[1])
-
-    def zpFluxFnu(self,perArea=True):
-        F0lam = self.zpFlux(perArea=perArea)
-        return (F0lam / const.c.cgs *((self.effWave())**2.)).to(u.erg/u.s/u.cm**2/u.Hz)
-
-    def zpCnt(self,perArea=True):
-        zp_dum = self._zpFluxesFcnt()
-        if perArea==True:
-            return countFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])/self.areaA()
-        else:
-            return countFilter(zp_dum[0], self.wave, self.transmission, zp_dum[1])
-
-    def meanWave(self):
-        return np.average(self.wave,weights=self.transmission)
-
-    def effWave(self):
-        fw = np.interp(self.wave, self.filterFLambdaBins().value, self._zpFluxesFlam()[1])
-        n1 = self.wave*self.transmission*fw
-        d1 = self.transmission*fw
-        return np.trapz(n1)/np.trapz(d1)
-
-    def pivot(self):
-        lt = np.trapz(self.wave*self.transmission, self.wave)
-        return np.sqrt(lt/np.trapz(self.transmission/self.wave,self.wave))
-
-    def peakWave(self):
-        return self.wave[self.transmission==max(self.transmission)][0]
-
-    def minWave(self):
-        return min(self.wave)
-
-    def maxWave(self):
-        return max(self.wave)
-
-    def extinction(self, eb_v, dust_law, r_v=3.1):
-        """ Given eb-v and r-v return the dust extinction in a particular BAND 
-         It can use:
-         Cardelli dust law (CCM),
-         ODonneal (OD94)
-         Fitzpatrick (F99)
-        
-        KEEP IN MIND:
-        _minwave = 909.09
-        _maxwave = 33333.33
-         """
-        if dust_law=='OD94':
-            dust = sncosmo.OD94Dust()
-        elif dust_law=='CCM':
-            dust = sncosmo.CCM89Dust()
-        elif dust_law=='F99':
-            dust = sncosmo.F99Dust()
-        else: print ('Add this dust law! I dont know it')
-
-        dust.parameters = [eb_v, r_v]
-        w = self.wave
-        t = self.transmission
-        ext = dust.propagate(w,t)
-        correction_extinction = np.trapz((ext)[1:-1], w[1:-1])/np.trapz((t)[1:-1], w[1:-1])
-        return correction_extinction
-
-
-
+    def _zpFluxesFnu(self):
+        return self._cached_zpFluxesFnu
 
 
 class Spectrum(object):
@@ -391,43 +279,37 @@ class Spectrum(object):
     def bandflux(self, band):
         """Do some integration through a filter in this function
         """
-        filt_int = np.interp(self.wave, band.wave.value,band.transmission)
+        w_val = self.wave.value if hasattr(self.wave, 'value') else self.wave
+        bw_val = band.wave.value if hasattr(band.wave, 'value') else band.wave
+        filt_int = np.interp(w_val, bw_val, band.transmission)
         filtspec = filt_int*self.flux
-        flux1 = np.trapz(filtspec,self.wave)/band.areaA()
+        flux1 = trapz(filtspec, x=self.wave)/band.areaA()
         return flux1
 
     def runningSmooth(self, AAbin=None, NumBin=None):
-        if AAbin==NumBin==None:
-            raise ValueError('You must provide a binning.\
-             Either AAbin to provide the angstrom bins (rounded to\
-              nearest integer) or NumBin for number of bins')
-        if NumBin is not None and NumBin.is_integer()==False:
+        if AAbin is None and NumBin is None:
+            raise ValueError('You must provide a binning. Either AAbin to provide the angstrom bins (rounded to nearest integer) or NumBin for number of bins')
+        if NumBin is not None and not float(NumBin).is_integer():
             raise ValueError('NumBin must be an integer')
 
         if AAbin is not None:
             medDiff = np.median(np.diff(self.wave))
             nbins = int(AAbin/medDiff)
-            self.wave = np.convolve(self.wave, np.ones((nbins,))/nbins, mode='valid')
-            self.flux = np.convolve(self.flux, np.ones((nbins,))/nbins, mode='valid')
-        elif AAbin is None:
-            self.wave = np.convolve(self.wave, np.ones((NumBin,))/NumBin, mode='valid')
-            self.flux = np.convolve(self.flux, np.ones((NumBin,))/NumBin, mode='valid')
+        else:
+            nbins = int(NumBin)
+            
+        self.wave = np.convolve(self.wave, np.ones((nbins,))/nbins, mode='same')
+        self.flux = np.convolve(self.flux, np.ones((nbins,))/nbins, mode='same')
 
     def binSpec(self, nbins, median=True):
-        """Write this function at some point
-        median or mean bin the spectrum
+        """median or mean bin the spectrum
         """
-        def medianFootprint(values):
-            return np.median(values)
-        def meanFootprint(values):
-            return np.mean(values)
-        footprint = np.ones((nbins,))
-        if median==True:
-            self.wave = spfilt.generic_filter(self.wave,medianFootprint,footprint=footprint,mode='reflect',cval=0.)
-            self.flux = spfilt.generic_filter(self.flux,medianFootprint,footprint=footprint,mode='reflect',cval=0.)
+        if median:
+            self.wave = ndimage.median_filter(self.wave, size=nbins, mode='reflect')
+            self.flux = ndimage.median_filter(self.flux, size=nbins, mode='reflect')
         else:
-            self.wave = spfilt.generic_filter(self.wave,meanFootprint,footprint=footprint,mode='reflect',cval=0.)
-            self.flux = spfilt.generic_filter(self.flux,meanFootprint,footprint=footprint,mode='reflect',cval=0.)
+            self.wave = ndimage.uniform_filter(self.wave, size=nbins, mode='reflect')
+            self.flux = ndimage.uniform_filter(self.flux, size=nbins, mode='reflect')
 
     def filterOverlap(self, band):
         """This function checks to see if there is complete, partial, or no overlap of the spectrum
@@ -439,5 +321,3 @@ class Spectrum(object):
         hi2 = max(self.wave)
         inarr = low1>low2 and hi1<hi2
         return inarr
-
-#def polyFitPhot()
